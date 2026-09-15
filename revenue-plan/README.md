@@ -41,6 +41,12 @@ something. The recurring engine is Layers 2-3 and it takes months.
 > **DECISION (2026-09-15): this is the chosen route.** Layers 2 and 3 below are retained as
 > the month 2-6 roadmap but are not being worked yet. Article 1 is drafted and verified in
 > `articles/01-entra-oauth-consent-audit/`.
+>
+> **UPDATE: the goal widened from one-off cash to recurring weekly assignments.** See
+> [`recurring-pipeline.md`](recurring-pipeline.md), which supersedes parts of this section.
+> Two corrections land there: **Practical365 is closed to new contributors**, and the
+> developer-content agencies are a **poor fit** for M365/Windows expertise - pure-play
+> cybersecurity content agencies are the better target.
 
 Your existing expertise (M365 / Entra / Exchange / PowerShell security tooling,
 incident response) maps directly onto outlets that pay cash per article.
@@ -53,7 +59,7 @@ incident response) maps directly onto outlets that pay cash per article.
 | **LogRocket Blog** | **up to $350/article** (2,500-3,000 words, code + repo) | Good — pitch a PowerShell/Entra automation angle | High. Public guest-author application |
 | **Toptal Engineering Blog** | **$500+** | Good, but vetted-expert positioning, competitive | Medium — stretch submission |
 | **4sysops.com** | "above average" + traffic bonus — **no public figure** | *Best topical fit that exists* (Windows/PowerShell/cloud, IT pros) | **Email for rate BEFORE writing** |
-| **Practical365.com** | Historically paid — **rate and current status unconfirmed** | Most on-topic outlet alive (Exchange/Entra/PowerShell, MVP-run) | **Email `write@practical365.com` to confirm they're open** |
+| **Practical365.com** | **CLOSED to new contributors** | Was the most on-topic outlet alive (Exchange/Entra/PowerShell, MVP-run) | **Not currently an option.** Recheck monthly - see `recurring-pipeline.md` |
 
 ### The math
 
@@ -73,7 +79,7 @@ Either one alone gets you 75-90% of the way there.
 
 | Days | Action | Hours |
 |---|---|---|
-| 1 | Send rate-inquiry emails to 4sysops + Practical365 (templates in `pitches/`). Costs 20 min, runs in background all month. | 0.5 |
+| 1 | Send rate-inquiry email to 4sysops (template in `pitches/`). **Practical365 is closed - skip it.** Costs 20 min, runs in background all month. | 0.5 |
 | 1-2 | Submit DigitalOcean topic pitch + LogRocket guest-author application **in parallel**. Do not wait for one to answer. | 2 |
 | 3-10 | Draft article #1 (whichever accepts first). 2,500-3,000 words, working code, real repo. | 6-8 |
 | 11-14 | Submit #1. Start article #2 immediately — do not idle waiting on edits. | 4 |
@@ -273,7 +279,7 @@ AppSource review timeline; the free-competition landscape.
 
 **Explicitly unverified — confirm before relying on:**
 - 4sysops per-article rate (page unreachable)
-- Practical365 contributor status and rate (may be closed)
+- ~~Practical365 contributor status~~ - resolved: CLOSED to new contributors
 - The $29-49 price point (inference from comps, not a sourced threshold)
 - r/msp and r/sysadmin exact current self-promo rules (Reddit unreachable in research)
 - NordLayer / Bitwarden / Proton affiliate percentages

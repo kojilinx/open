@@ -310,6 +310,42 @@ burning agency applications before you can win them.
 
 ---
 
+### 6.4 Discovery seed list
+
+Sourced from the recurring-pipeline research (`revenue-plan/recurring-pipeline.md`).
+**RSS/JSON first; scrape only where no feed exists.**
+
+**Feed-backed (build these adapters first, phase 5)**
+
+| Source | Feed | Note |
+| --- | --- | --- |
+| We Work Remotely | `weworkremotely.com/remote-jobs.rss` | No writing category; poll main feed, filter by keyword |
+| ProBlogger Job Board | RSS offered, per-category subscriptions available | Confirm exact feed URL at setup |
+| Remotive | `remotive.com/remote-jobs/rss-feed` | General board, keyword-filter |
+| Himalayas | `himalayas.app/rss` | General board, keyword-filter |
+| Substack job newsletters | `<publication>.substack.com/feed` | Substack publishes RSS by default at this path |
+
+**Scrape-or-manual (phase 6, or never)**
+
+| Source | Why no feed | Recommendation |
+| --- | --- | --- |
+| Superpath job board | No RSS found | Their Slack community is a better real-time source than the board |
+| "Write for us" pages (Practical365, Petri, ITPro Today, Redmond) | Static pages, not job feeds | **Monthly manual check, not a poller.** These change open/closed status - Practical365 closed since the last pass |
+| CompTIA workshop index | No RSS | Handful of postings a year. Quarterly manual check beats building an adapter |
+| nDash | Invite/application-gated | Not publicly pollable |
+
+**Excluded deliberately**
+
+- **LinkedIn** - terms explicitly prohibit scraping. Do not build an adapter.
+- **Contena / Writing.io Jobs** - reportedly pivoted away from freelance writing to AI/eng
+  roles. No longer relevant.
+- **Reddit** - offers RSS at `old.reddit.com/r/<sub>/.rss` and its terms permit RSS
+  consumption of public content within rate limits. Viable, but low signal-to-noise for paid
+  technical writing specifically. Add only if the feed adapters prove insufficient.
+
+A source's `robots_allowed` flag is checked before any fetch regardless of what this table
+says.
+
 ## 7. Pipeline state machine
 
 ```
@@ -699,10 +735,15 @@ and only continue if it is actually saving time.
 
 1. ~~Claude Code invocation specifics~~ - **resolved**, section 8. One residual task:
    smoke-test the SDK surface against the installed version before phase 3, per 8.7.5.
-2. **Which discovery sources make the seed list** - depends on the agency/outlet research
-   currently running. Blocking for phase 5.
+2. ~~Which discovery sources make the seed list~~ - **resolved**, section 6.4.
 3. **Does the articles output live in this repo or its own?** Recommend its own repo, so the
    dashboard can be public while drafts stay private.
-4. **Clip strategy** - agencies want 2-3 published clips. Whether to self-publish two deep
-   technical posts to bootstrap, or route everything through paid outlets first, is a
-   strategy decision the dashboard should reflect but cannot make.
+4. ~~Clip strategy~~ - **resolved.** The Foundry Expert Contributor Network
+   (CSO Online / CIO / Computerworld / InfoWorld / Network World) is open, self-service, and
+   requires **no prior clips**. It is unpaid, but it produces real bylines on recognized
+   outlets, which is exactly what agencies gate on. Seed `outlets` with
+   `requires_clips = 0` for those, and `requires_clips = 2` for the agencies. See
+   `revenue-plan/recurring-pipeline.md` section 2.
+5. **Should the dashboard track unpaid clip-building outlets at all?** Recommend yes, as a
+   distinct `kind = 'clip_builder'`, so the board shows progress toward unblocking the
+   agencies rather than treating $0 opportunities as noise the fit score discards.
