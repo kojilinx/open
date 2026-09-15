@@ -342,98 +342,214 @@ so the transition handler re-evaluates all `blocked` rows.
 
 ## 8. Drafting engine
 
-> **Verification pending.** The exact invocation mechanics - headless flags, SDK surface,
-> streaming event shapes, and permission-mode values - are being confirmed against current
-> Claude Code documentation. This section specifies the *contract* the engine must satisfy;
-> the concrete API calls get filled in from that verification rather than from memory.
-> Do not implement this section until it is completed.
+Verified against current Claude Code documentation (links at 8.8). **Version-dependent:
+confirm flags and option names against the installed CLI and SDK types before implementing
+- see 8.7.**
 
-### 8.1 Contract
+### 8.1 Choice: the TypeScript Agent SDK, not the CLI
 
-The engine exposes:
+Use `@anthropic-ai/claude-agent-sdk` rather than shelling out to `claude -p`.
+
+| | Agent SDK | `claude -p` |
+| --- | --- | --- |
+| Message handling | Typed union, maps cleanly to our `RunEvent` | Parse newline-delimited JSON yourself |
+| Hooks | `PreToolUse` interception available - this is our path-restriction backstop | Not available |
+| Session control | Resume / fork / continue as options | Flags, new subprocess per call |
+| Cost | Reported per message | Reported on final result |
+
+The hook support is decisive. Section 8.4 depends on it.
+
+### 8.2 Invocation shape
+
+```ts
+import { query } from "@anthropic-ai/claude-agent-sdk";
+
+for await (const message of query({
+  prompt: buildPrompt(job),
+  options: {
+    cwd: job.workingDir,
+    permissionMode: "dontAsk",
+    allowedTools: [
+      "Read", "Glob", "Grep",
+      `Write(${job.workingDir}/*)`,
+      `Edit(${job.workingDir}/*)`,
+      "Bash(git *)",
+      "Bash(pwsh *)",
+    ],
+    disallowedTools: ["Bash(rm *)", "WebFetch", "WebSearch"],
+    maxTurns: 30,
+    settingSources: ["project"],
+    includePartialMessages: true,
+    systemPrompt: {
+      type: "preset",
+      preset: "claude_code",
+      append: outletStyleBlock(job.outletProfile),
+    },
+  },
+})) {
+  handle(message);
+}
+```
+
+### 8.3 Permission mode: `dontAsk`, never `bypassPermissions`
+
+`dontAsk` permits only the explicit `allowedTools` plus reads and read-only Bash. Everything
+else is denied rather than prompting - which is what you want for an unattended run, since a
+prompt with nobody watching just hangs.
+
+`bypassPermissions` approves essentially everything and is appropriate only inside a
+disposable container. This dashboard runs on your workstation, next to client work. Do not
+use it, and do not add it as a config option, because a config option is something you will
+eventually switch on at 11pm to get past an error.
+
+### 8.4 Path restriction is enforced twice
+
+Scoped `Write`/`Edit` patterns are the first layer. They are string patterns, and a pattern
+mistake silently widens access, so a `PreToolUse` hook is the backstop:
+
+```ts
+hooks: {
+  async preToolUse(toolUse) {
+    if (["Write", "Edit"].includes(toolUse.name)) {
+      const target = path.resolve(String(toolUse.input.path ?? ""));
+      const root = path.resolve(job.workingDir);
+      // resolve() first, then check - defeats ../ traversal
+      if (target !== root && !target.startsWith(root + path.sep)) {
+        return { decision: "deny", reason: `Write outside ${root}` };
+      }
+    }
+    return { decision: "allow" };
+  }
+}
+```
+
+Resolve before comparing. A naive `startsWith` on the raw string is defeated by `../`.
+
+Network tools are denied outright. Drafting needs no network, and an agent that cannot
+reach the internet cannot exfiltrate a draft containing client data that slipped past the
+Disclosure Gate.
+
+### 8.5 Streaming to the UI
+
+With `includePartialMessages: true`, map the SDK message union onto our `RunEvent` type:
+
+| SDK message | `RunEvent` |
+| --- | --- |
+| `stream_event` with `delta.type === "text_delta"` | `{ t: 'text', chunk }` |
+| `assistant` with a `tool_use` content block | `{ t: 'tool_use', name, summary }` |
+| `system` (`subtype: "init"` / `"compact_boundary"`) | `{ t: 'status', status }` |
+| `result` | `{ t: 'done', result }` |
+
+`stream_event` payloads are raw API events, not SDK abstractions - parse `delta.type` and
+`content_block.type` yourself. Tool *results* are not streamed; they arrive in the following
+user message. The run console should therefore show tool *invocations* live and results as
+they land, not pretend to stream both.
+
+### 8.6 Bounding the run
+
+- **Turns:** `maxTurns: 30`. An outline run needs far fewer; cap it at 10.
+- **Budget:** set a per-job USD ceiling. The run then terminates with a
+  `error_max_budget_usd` result subtype rather than running away.
+- **Wall clock:** **there is no top-level SDK timeout.** Wrap the iteration in a
+  `Promise.race` against a timer and abort the loop yourself. Record the run as `timeout`.
+  Do not skip this - it is the difference between a stuck job and a stuck job you find out
+  about tomorrow.
+- **Result subtypes to handle:** `success`, `error_max_turns`, `error_max_budget_usd`. Store
+  the subtype in `runs.exit_reason` verbatim.
+
+### 8.7 Gotchas that shape the design
+
+1. **The agent must write files, not describe them.** Left to itself the model will emit the
+   article as text in its reply. The prompt must explicitly instruct it to `Write` the
+   article and script to disk at named paths, and the engine must verify those files exist
+   before marking the run succeeded. A run that "succeeded" with no files on disk is the
+   most likely failure mode of this whole system.
+2. **Session transcripts are local.** Stored under the user profile keyed by working
+   directory. Fine for a single-process localhost app; it means a machine rebuild loses
+   resume history, which is acceptable here.
+3. **Each `query()` call spawns a subprocess.** For the outline-then-draft flow, persist
+   `session_id` from the first `ResultMessage` and pass it as `resume` on the draft run
+   rather than expecting one live process across both.
+4. **Context compaction happens automatically** at token thresholds and does not reset cost.
+   A 3,000-word draft run may compact mid-flight; that is fine, but do not treat a
+   `compact_boundary` system message as an error.
+5. **Verify the surface before building.** The flags and option names above are
+   version-dependent. Before phase 3, run `claude --help`, check the installed SDK's exported
+   types, and smoke-test a trivial job end to end. Treat 8.2 as the intended shape, not as
+   an API contract.
+
+### 8.8 Sources
+
+- `code.claude.com/docs/en/headless.md` - CLI flags
+- `code.claude.com/docs/en/agent-sdk/typescript.md` - SDK API
+- `code.claude.com/docs/en/agent-sdk/streaming-output.md` - event shapes
+- `code.claude.com/docs/en/permission-modes.md` - permission modes
+- `code.claude.com/docs/en/agent-sdk/permissions.md` - permission evaluation
+- `code.claude.com/docs/en/agent-sdk/sessions.md` - resume / fork / continue
+- `code.claude.com/docs/en/agent-sdk/modifying-system-prompts.md` - system prompt options
+
+### 8.9 Job context assembly
+
+Each run is given, in order of precedence:
+
+1. **Outlet profile** via `systemPrompt.append` - word range, markdown flavor, house
+   conventions, a published example from that outlet.
+2. **Domain conventions** via the project `CLAUDE.md` and the existing
+   `m365-security-tooling` skill, which governs any PowerShell produced: ASCII-only,
+   Graph-first, read-only scanner scopes, the finding schema, recommend-never-apply for
+   high-blast-radius changes.
+3. **The article brief** - topic, angle, approved outline, in the prompt body.
+4. **The verification contract** - the run is told up front exactly which mechanical checks
+   its output must pass. An agent told the acceptance criteria hits them far more often than
+   one that finds out afterward.
+
+### 8.10 Two-stage drafting
+
+Do not go straight to a 3,000-word draft.
+
+1. **Outline run** - cheap, `maxTurns: 10`. Produces title, hook, prerequisites, numbered
+   steps, the code artifact, and the conclusion's extension paths. You review and edit it in
+   the UI. This is where you steer, at a cost of minutes.
+2. **Draft run** - expensive, resumes the outline session. Takes the *approved* outline,
+   writes the full piece plus companion code to disk, then runs the verification gate itself
+   and fixes what it can before handing back.
+
+The outline gate is what keeps the economics sane. Rewriting a bad 3,000-word draft costs
+more than writing a good one.
+
+### 8.11 Engine contract
 
 ```ts
 interface DraftRequest {
   articleId: string;
   kind: 'outline' | 'draft' | 'revise' | 'verify_fix';
-  outletProfile: OutletProfile;   // style guide, word range, md flavor
+  outletProfile: OutletProfile;
   topic: string;
-  outline?: string;               // required for kind='draft'
-  priorFeedback?: string;         // for kind='revise'
-  workingDir: string;             // the article's directory, scoped
+  outline?: string;          // required when kind === 'draft'
+  priorFeedback?: string;    // for kind === 'revise'
+  workingDir: string;        // scoped; enforced by 8.4
   branch: string;
+  resumeSessionId?: string;
 }
 
 interface DraftRunHandle {
   runId: string;
-  events: AsyncIterable<RunEvent>;  // streamed to SSE
+  events: AsyncIterable<RunEvent>;
   cancel(): Promise<void>;
   result: Promise<DraftResult>;
 }
 
 type RunEvent =
-  | { t: 'status';    status: string }
-  | { t: 'tool_use';  name: string; summary: string }
-  | { t: 'text';      chunk: string }
-  | { t: 'error';     message: string }
-  | { t: 'done';      result: DraftResult };
+  | { t: 'status';   status: string }
+  | { t: 'tool_use'; name: string; summary: string }
+  | { t: 'text';     chunk: string }
+  | { t: 'error';    message: string }
+  | { t: 'done';     result: DraftResult };
 ```
 
-Requirements the implementation must meet:
-
-- **Long-running.** A draft run may take 10-30 minutes. No HTTP request may block on it.
-  Start the run, return a `runId` immediately, stream progress over SSE.
-- **Resumable.** Persist the session id so a `revise` run can continue with context rather
-  than starting cold.
-- **Cancellable.** A cancel must terminate the child process and mark the run `cancelled`.
-- **Bounded.** Every run carries a turn cap and a wall-clock timeout. On timeout, kill and
-  mark `timeout`. Unbounded agent runs are how you get a surprise bill.
-- **Logged.** All events append to `runs.log_path` as newline-delimited JSON, so a run can be
-  replayed or debugged after the fact.
-
-### 8.2 Scoped permissions
-
-The run must be granted the narrowest useful tool set:
-
-- Write access limited to the article's own directory. Not the repo root, not `$HOME`.
-- Git operations limited to the article branch.
-- The verification commands (`pwsh` parse check, the mock harness) explicitly allowed.
-- Network access not required for drafting and should be denied by default.
-- **No blanket permission bypass.** If the correct mechanism is an allowlist of tools plus a
-  restricted working directory, that is what gets used.
-
-A hook that rejects writes outside `workingDir` is the backstop, so that a
-misconfigured allowlist still cannot touch the rest of the machine.
-
-### 8.3 Job context assembly
-
-Each run is given, in order of precedence:
-
-1. **The outlet profile** - word range, markdown flavor, house conventions, example of a
-   published piece from that outlet.
-2. **The domain conventions** - the existing `m365-security-tooling` skill governs any
-   PowerShell the article produces: ASCII-only, Graph-first, read-only scanner scopes, the
-   finding schema, recommend-never-apply for high-blast-radius changes.
-3. **The article brief** - topic, angle, approved outline.
-4. **The verification contract** - the run is told, up front, exactly which mechanical checks
-   its output must pass. An agent told the acceptance criteria hits them far more often than
-   one that finds out afterward.
-
-### 8.4 Two-stage drafting
-
-Do not go straight to a 3,000-word draft.
-
-1. **Outline run** (cheap, fast). Produces a structured outline: title, hook, prerequisites,
-   numbered steps, the code artifact, the conclusion's extension paths. You review and edit
-   this in the UI. This is where you steer, and it costs minutes instead of half an hour.
-2. **Draft run** (expensive). Takes the *approved* outline and writes the full piece plus
-   companion code, then runs the verification gate itself and fixes what it can before
-   handing back.
-
-The outline gate is what keeps the economics sane. Rewriting a bad 3,000-word draft costs
-more than writing a good one.
-
----
+Requirements: start returns a `runId` immediately and never blocks an HTTP request; progress
+streams over SSE; cancel terminates the run and marks it `cancelled`; every run is bounded
+per 8.6; all events append to `runs.log_path` as newline-delimited JSON for replay.
 
 ## 9. Verification gate
 
@@ -555,7 +671,7 @@ All free and local.
 | `fast-xml-parser` | RSS/Atom |
 | `robots-parser` | robots.txt compliance |
 | `react`, `vite` | Frontend |
-| `@anthropic-ai/claude-agent-sdk` *(pending verification)* | Driving Claude Code |
+| `@anthropic-ai/claude-agent-sdk` | Driving Claude Code (see section 8) |
 
 **External binary:** `pwsh` (PowerShell 7+) must be on PATH for the PowerShell verification
 checks. The gate degrades to a warning if absent rather than failing the run.
@@ -581,8 +697,8 @@ and only continue if it is actually saving time.
 
 ## 15. Open questions
 
-1. **Claude Code invocation specifics** - pending verification (section 8). Blocking for
-   phases 3-4.
+1. ~~Claude Code invocation specifics~~ - **resolved**, section 8. One residual task:
+   smoke-test the SDK surface against the installed version before phase 3, per 8.7.5.
 2. **Which discovery sources make the seed list** - depends on the agency/outlet research
    currently running. Blocking for phase 5.
 3. **Does the articles output live in this repo or its own?** Recommend its own repo, so the
