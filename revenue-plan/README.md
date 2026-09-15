@@ -38,6 +38,10 @@ something. The recurring engine is Layers 2-3 and it takes months.
 
 ## 2. Layer 1 — Paid technical writing (the 30-day lever)
 
+> **DECISION (2026-09-15): this is the chosen route.** Layers 2 and 3 below are retained as
+> the month 2-6 roadmap but are not being worked yet. Article 1 is drafted and verified in
+> `articles/01-entra-oauth-consent-audit/`.
+
 Your existing expertise (M365 / Entra / Exchange / PowerShell security tooling,
 incident response) maps directly onto outlets that pay cash per article.
 
